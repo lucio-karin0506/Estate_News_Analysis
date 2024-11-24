@@ -29,7 +29,7 @@ class NewsCrawler:
         self.driver.get(f'https://land.naver.com/news/region.naver?city_no=1100000000&dvsn_no={self.region_code}')
 
 
-    def get_basic_info(self):
+    def get_basic_info(self) -> pd.DataFrame:
 
         '''
             - 각 페이지 내 뉴스 기사 기본 정보 get
@@ -45,12 +45,12 @@ class NewsCrawler:
         idx_list, title_list, href_list, date_list, media_list = [], [], [], [], []
         for idx, tags in enumerate(self.driver.find_elements('xpath', '//ul[@class="headline_list live_list NEI=a:lst.title"]/li/dl')):
             
-            a_tag_info = tags.find_element('tag name', 'dt').find_element('tag name', 'a')
+            a_tag_info = tags.find_element('xpath', './/dt[not(@class="photo")]/a')
             href = a_tag_info.get_attribute('href')
             title = a_tag_info.text
 
-            media_info = tags.find_elements('xpath', '//dd//span[@class="writing"]')[0].text
-            date_info = tags.find_elements('xpath', '//dd//span[@class="date"]')[0].text
+            media_info = tags.find_element('xpath', './/dd//span[@class="writing"]').text
+            date_info = tags.find_element('xpath', './/dd//span[@class="date"]').text
 
             idx_list.append(idx+1)
             title_list.append(title)
@@ -65,6 +65,8 @@ class NewsCrawler:
             'date' : date_list,
             'media' : media_list
         }
+
+        basic_news_info_dic['region_code'] = self.region_code
 
         return pd.DataFrame(basic_news_info_dic)
 
