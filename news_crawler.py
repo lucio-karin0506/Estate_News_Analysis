@@ -1,32 +1,76 @@
 import pandas as pd
+import numpy as np
 
+import requests
 from selenium import webdriver
+from bs4 import BeautifulSoup
+
+from tqdm.auto import tqdm
 
 import warnings
 warnings.filterwarnings('ignore')
 
 # 네이버 부동산 뉴스 - 우리동네 뉴스 서울특별시 행정구 코드
 region_code_dic = {
-        '강남구' : 1168000000
+        # '강남구' : 1168000000,
+        # '강동구' : 1174000000
+        '강북구' : 1130500000,
+        '강서구' : 1150000000,  
+        '관악구' : 1162000000,
+        '광진구' : 1121500000,
+        '광진구' : 1121500000,
+        '구로구' : 1153000000,
+        '금천구' : 1154500000,
 }
 
 
 # 서울특별시 내 행정구 단위 부동산 뉴스 crawler 클래스
 class NewsCrawler:
 
-    def __init__(self, region_code) -> None:
+    def __init__(self, region_code: int, page_num: int) -> None:
 
         '''
-            - chrome driver 멤버변수 초기화
+            - chrome driver & 지역코드 멤버변수 초기화
 
             - args:
                 - region_code: 행정구 code
+
+            - return: None
         '''
 
         self.region_code = region_code
+        self.page_num = page_num
 
         self.driver = webdriver.Chrome()
-        self.driver.get(f'https://land.naver.com/news/region.naver?city_no=1100000000&dvsn_no={self.region_code}')
+        self.driver.get(f'https://land.naver.com/news/region.naver?city_no=1100000000&dvsn_no={self.region_code}&page={self.page_num}')
+
+
+    def get_detail_article(self, news_url: str) -> str:
+
+        '''
+            - 각 페이지 내 뉴스 기사 본문 크롤링
+
+            - args:
+                - news_url: 뉴스 기사 url
+
+            - return:
+                - article_text: 뉴스 기사 본문
+        '''
+
+        # HTTP GET 요청
+        response = requests.get(news_url)
+
+        # HTML 파싱
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        article_tag = soup.select_one('#dic_area')
+
+        try:
+            article_text = article_tag.get_text(separator='', strip=True)
+            return article_text
+        
+        except:
+            return np.nan
 
 
     def get_basic_info(self) -> pd.DataFrame:
@@ -42,26 +86,28 @@ class NewsCrawler:
         '''
 
         # idx, 기사 제목, 본문 링크, 작성일, 언론사
-        idx_list, title_list, href_list, date_list, media_list = [], [], [], [], []
-        for idx, tags in enumerate(self.driver.find_elements('xpath', '//ul[@class="headline_list live_list NEI=a:lst.title"]/li/dl')):
+        title_list, href_list, article_list, date_list, media_list = [], [], [], [], []
+        for _, tags in enumerate(self.driver.find_elements('xpath', '//ul[@class="headline_list live_list NEI=a:lst.title"]/li/dl')):
             
             a_tag_info = tags.find_element('xpath', './/dt[not(@class="photo")]/a')
             href = a_tag_info.get_attribute('href')
             title = a_tag_info.text
 
+            article = self.get_detail_article(href)
+
             media_info = tags.find_element('xpath', './/dd//span[@class="writing"]').text
             date_info = tags.find_element('xpath', './/dd//span[@class="date"]').text
 
-            idx_list.append(idx+1)
             title_list.append(title)
             href_list.append(href)
+            article_list.append(article)
             date_list.append(date_info)
             media_list.append(media_info)
 
         basic_news_info_dic = {
-            'id' : idx_list,
             'title' : title_list,
             'link' : href_list,
+            'article' : article_list,
             'date' : date_list,
             'media' : media_list
         }
@@ -69,30 +115,38 @@ class NewsCrawler:
         basic_news_info_dic['region_code'] = self.region_code
 
         return pd.DataFrame(basic_news_info_dic)
-
-
-    def get_detail_article(self):
-
-        '''
-            - 뉴스 기사 본문
-        '''
-
-        pass
-
     
-    def get_article_by_page(self):
-        
-        '''
-            - link 끝 page num에 따라 뉴스 정보 get (상단 두 함수 for loop by page)
-        '''
 
-        pass
+    def get_page_num(self) -> int:
+
+        '''
+            - 페이지 수 탐색
+        '''
+        page_num = self.driver.find_element('xpath', '//*[@id="content"]/div[3]/a[strong]/strong').text
+
+        return int(page_num)
 
 
 if __name__ == '__main__':
 
-    region = region_code_dic['강남구']
+    for region, region_code in region_code_dic.items():
 
-    news_crawler = NewsCrawler(region_code=region)
+        print(region)
 
-    print(news_crawler.get_basic_info())
+        news_result_df_list = []
+        for page_num in tqdm(range(1, 135), leave=True): # page range 1 ~ 135는 2010년 6월까지 가장 많은 페이지를 갖는 중구 기준
+
+            news_crawler = NewsCrawler(region_code=region_code, page_num=page_num)
+
+            real_page_num = news_crawler.get_page_num()
+
+            if real_page_num == page_num:
+                news_result_df = news_crawler.get_basic_info()
+                news_result_df_list.append(news_result_df)
+
+            else:
+                break
+
+        final_news_result_df = pd.concat(news_result_df_list, ignore_index=True).drop_duplicates()
+        final_news_result_df['region'] = region
+        final_news_result_df.to_csv(f'{region}_news.csv', encoding='utf-8-sig')
